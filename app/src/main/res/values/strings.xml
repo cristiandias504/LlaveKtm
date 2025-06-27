@@ -1,3 +1,10 @@
 <resources>
     <string name="app_name">Llave Ktm</string>
+    <string name="imagenKTM">Imagen KTM</string>
+    <string name="Saludo">HOLA</string>
+    <string name="NombreUsuario">CRISTIAN CAMILO</string>
+    <string name="botonApagar">Apagar</string>
+    <string name="botonEncender">Encender</string>
+    <string name="botonActivarAlarma">Activar Alarma</string>
+    <string name="botonDesactivarAlarma">Desactivar Alarma</string>
 </resources>
