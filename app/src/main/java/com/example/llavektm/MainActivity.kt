@@ -2,7 +2,6 @@ package com.example.llavektm
 
 import android.animation.ObjectAnimator
 import android.content.res.ColorStateList
-import android.graphics.Color
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -16,9 +15,7 @@ import android.widget.ToggleButton
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.constraintlayout.widget.ConstraintLayout
-import androidx.constraintlayout.widget.ConstraintSet.Layout
 import androidx.core.content.ContextCompat
-import androidx.core.os.postDelayed
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.isVisible
@@ -35,8 +32,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnApagar: Button
     private lateinit var btnAlarma: Button
 
-    val duracionAnimacion: Long = 300L
-    var conexionProximidad = false
+    private val duracionAnimacion: Long = 300L
+    private var conexionProximidad = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -58,32 +55,32 @@ class MainActivity : AppCompatActivity() {
         btnApagar = findViewById(R.id.btnApagar)
         btnAlarma = findViewById(R.id.btnAlarma)
 
-        AnimacionImagenKTM()
+        animacionImagenKTM()
 
         var estadoConexion = false
 
         btnConectar.setOnClickListener{
             if (!estadoConexion){
-                btnConectar.text = "CONECTANDO"
-                btnConectar.setTextColor(Color.parseColor("#FF7518"))
+                btnConectar.text = getText(R.string.Conectando)
+                btnConectar.setTextColor(ContextCompat.getColor(this, R.color.naranja))
                 barraProgresoConexion.visibility = View.VISIBLE
                 estadoConexion = true
                 Handler(Looper.getMainLooper()).postDelayed({
-                    btnConectar.text = "CONECTADO"
-                    btnConectar.setTextColor(Color.parseColor("#2ECC71"))
+                    btnConectar.text = getText(R.string.Conectado)
+                    btnConectar.setTextColor(ContextCompat.getColor(this, R.color.verde))
                     barraProgresoConexion.isIndeterminate = false
                     ObjectAnimator.ofInt(barraProgresoConexion, "progress", 0, 100).apply {
                         duration = 500 // 5 segundos
                         interpolator = LinearInterpolator()
                         start()
                     }
-                    AnimacionPrincipalPositiva()
-                    barraProgresoConexion.progressTintList = ColorStateList.valueOf(Color.parseColor("#2ECC71"))
+                    animacionPrincipalPositiva()
+                    barraProgresoConexion.progressTintList = ColorStateList.valueOf(ContextCompat.getColor(this, R.color.verde))
                     logoBluetooth.setImageResource(R.drawable.bluetoothon)
                 }, 3000)
             } else {
-                btnConectar.text = "CONECTAR"
-                btnConectar.setTextColor(Color.parseColor("#000000"))
+                btnConectar.text = getText(R.string.Conectar)
+                btnConectar.setTextColor(ContextCompat.getColor(this, R.color.black))
                 barraProgresoConexion.visibility = View.INVISIBLE
                 estadoConexion = false
                 barraProgresoConexion.isIndeterminate = true
@@ -93,17 +90,17 @@ class MainActivity : AppCompatActivity() {
 
         btnProximidad.setOnClickListener {
             if (conexionProximidad){
-                AnimacionPrincipalIndeterminada()
+                animacionPrincipalIndeterminada()
                 Handler(Looper.getMainLooper()).postDelayed({
-                    AnimacionPrincipalPositiva()
+                    animacionPrincipalPositiva()
                     btnProximidad.setTextColor(ContextCompat.getColor(this, R.color.white))
                     btnProximidad.backgroundTintList = ColorStateList.valueOf(ContextCompat.getColor(this, R.color.gris))
                     conexionProximidad = false
                 }, 4000)
             } else {
-                AnimacionPrincipalIndeterminada()
+                animacionPrincipalIndeterminada()
                 Handler(Looper.getMainLooper()).postDelayed({
-                    AnimacionPrincipalPositiva()
+                    animacionPrincipalPositiva()
                     btnProximidad.setTextColor(ContextCompat.getColor(this, R.color.black))
                     btnProximidad.backgroundTintList = ColorStateList.valueOf(ContextCompat.getColor(this, R.color.naranja))
                     conexionProximidad = true
@@ -120,28 +117,28 @@ class MainActivity : AppCompatActivity() {
         }
 
         btnApagar.setOnClickListener {
-            AnimacionPrincipalIndeterminada()
+            animacionPrincipalIndeterminada()
             Handler(Looper.getMainLooper()).postDelayed({
-                AnimacionPrincipalPositiva()
+                animacionPrincipalPositiva()
             }, 4000)
         }
 
         btnAlarma.setOnClickListener {
-            AnimacionPrincipalIndeterminada()
+            animacionPrincipalIndeterminada()
             Handler(Looper.getMainLooper()).postDelayed({
-                AnimacionPrincipalNegativa()
+                animacionPrincipalNegativa()
             }, 4000)
         }
     }
 
-    private fun AnimacionPrincipalIndeterminada() {
+    private fun animacionPrincipalIndeterminada() {
         barraProgresoPrincipal.scaleX = 1f
         barraProgresoPrincipal.isIndeterminate = true
         barraProgresoPrincipal.progressTintList = ColorStateList.valueOf(ContextCompat.getColor(this, R.color.naranja))
         barraProgresoPrincipal.visibility = View.VISIBLE
     }
 
-    private fun AnimacionPrincipalPositiva() {
+    private fun animacionPrincipalPositiva() {
         barraProgresoPrincipal.scaleX = 1f
         barraProgresoPrincipal.isIndeterminate = false
         barraProgresoPrincipal.progressTintList = ColorStateList.valueOf(ContextCompat.getColor(this, R.color.verde))
@@ -164,7 +161,7 @@ class MainActivity : AppCompatActivity() {
         }, 500)
     }
 
-    private fun AnimacionPrincipalNegativa() {
+    private fun animacionPrincipalNegativa() {
         barraProgresoPrincipal.scaleX = 1f
         barraProgresoPrincipal.isIndeterminate = false
         barraProgresoPrincipal.progressTintList = ColorStateList.valueOf(ContextCompat.getColor(this, R.color.rojo))
@@ -187,7 +184,7 @@ class MainActivity : AppCompatActivity() {
         }, 500)
     }
 
-    private fun AnimacionImagenKTM() {
+    private fun animacionImagenKTM() {
         val animX = ObjectAnimator.ofFloat(imagenKTM, "scaleX", 0.1f, 1.25f)
         animX.duration = duracionAnimacion
         animX.interpolator = LinearInterpolator()

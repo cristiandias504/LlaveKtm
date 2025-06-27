@@ -1,7 +1,14 @@
 <resources>
     <string name="app_name">Llave Ktm</string>
     <string name="imagenKTM">Imagen KTM</string>
+    <string name="imagenPerfil">Imagen Perfil</string>
+    <string name="imagenLogoBluetooth">Imagen Logo BLuetooth</string>
+    <string name="duke390">390 DUKE</string>
+    <string name="proximidad">Proximidad</string>
     <string name="Saludo">HOLA</string>
+    <string name="Conectar">CONECTAR</string>
+    <string name="Conectando">CONECTANDO</string>
+    <string name="Conectado">CONECTADO</string>
     <string name="NombreUsuario">CRISTIAN CAMILO</string>
     <string name="botonApagar">Apagar</string>
     <string name="botonEncender">Encender</string>
