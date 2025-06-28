@@ -1,26 +1,84 @@
 package com.example.llavektm
 
+import android.Manifest
 import android.animation.ObjectAnimator
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothSocket
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.content.res.ColorStateList
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.View
 import android.view.animation.LinearInterpolator
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
+import android.widget.Toast
 import android.widget.ToggleButton
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.constraintlayout.widget.ConstraintLayout
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.isVisible
+import java.io.IOException
+import java.util.UUID
 
 class MainActivity : AppCompatActivity() {
+
+    // ID de la solicitud de permiso
+    private val REQUEST_PERMISSIONS_CODE = 1
+
+    // Variable estado de conexion
+    private var estadoConexion = 0  // 0=Desconectado, 1=Conectado, 2=Conectando
+
+    // Permisos necesarios para el uso del Bluetooth   ***ALGUNOS AUN NO SE USAN*** Nesesarios para scanear
+    private val requiredPermissions = arrayOf(
+        //Manifest.permission.BLUETOOTH,
+        Manifest.permission.BLUETOOTH_CONNECT,
+        //Manifest.permission.ACCESS_FINE_LOCATION,
+        //Manifest.permission.ACCESS_COARSE_LOCATION
+    )
+
+    private val deviceName = "ESP32"
+    private val sppUUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB") // UUID estándar SPP
+    private var btSocket: BluetoothSocket? = null
+    private lateinit var btDevice: BluetoothDevice
+    private val btAdapter: BluetoothAdapter? = BluetoothAdapter.getDefaultAdapter()
+
+    // Receptor de Broadcast
+    private val receptorMensaje = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val mensaje = intent?.getStringExtra("Mensaje") ?: "Sin mensaje"
+            Log.d("MainActivity", "Mensaje recibido: $mensaje")
+            if (mensaje == "Servicio iniciado correctamente") {
+                conexionIntentado()
+            } else if (mensaje == "Conexion establecida Correctamente") {
+                conexionEstablecida()
+            } else if (mensaje == "Conexión Bluetooth finalizada") {
+                conexionFinaliza()
+            } else if (mensaje == "Respuesta Verificacion de estado = true"){
+                conexionEstablecida()
+                Log.d("MainActivity", "Verificacion Completa: Servicio Activo, Conexion Estable")
+            }  else if (mensaje == "Respuesta Verificacion de estado = false"){
+                conexionIntentado()
+                Log.d("MainActivity", "Verificacion Completa: Servicio Activo, Sin Conexion")
+            } else {
+                //CuadroMensaje.text = mensaje.toString()
+            }
+        }
+    }
 
     private lateinit var btnConectar: TextView
     private lateinit var btnProximidad: ToggleButton
@@ -45,6 +103,12 @@ class MainActivity : AppCompatActivity() {
             insets
         }
 
+        // Verificar permisos
+        if (!verificarPermisos()) {
+            solicitarPermiso()
+        }
+
+
         btnConectar = findViewById(R.id.btnConectar)
         btnProximidad = findViewById(R.id.btnProximidad)
         barraProgresoConexion = findViewById(R.id.barraProgresoConexion)
@@ -57,36 +121,50 @@ class MainActivity : AppCompatActivity() {
 
         animacionImagenKTM()
 
-        var estadoConexion = false
+        // Crear y enviar el broadcast
+        val intentBroadcast = Intent("com.example.pruebaconexion.MensajeDeActivity").apply {
+            setPackage(packageName)
+            putExtra("Mensaje", "Verificacion de estado")
+        }
+
+        Log.d("MainActivity", "Verificacion de estado")
+        sendBroadcast(intentBroadcast)
 
         btnConectar.setOnClickListener{
-            if (!estadoConexion){
-                btnConectar.text = getText(R.string.Conectando)
-                btnConectar.setTextColor(ContextCompat.getColor(this, R.color.naranja))
-                barraProgresoConexion.visibility = View.VISIBLE
-                estadoConexion = true
-                Handler(Looper.getMainLooper()).postDelayed({
-                    btnConectar.text = getText(R.string.Conectado)
-                    btnConectar.setTextColor(ContextCompat.getColor(this, R.color.verde))
-                    barraProgresoConexion.isIndeterminate = false
-                    ObjectAnimator.ofInt(barraProgresoConexion, "progress", 0, 100).apply {
-                        duration = 500 // 5 segundos
-                        interpolator = LinearInterpolator()
-                        start()
+            if (estadoConexion == 0){
+
+                //if (!hasPermissions()) {
+                //    Toast.makeText(this, "Permisos necesarios no otorgados", Toast.LENGTH_SHORT).show()
+                //    solicitarPermiso()
+                //    return@setOnClickListener
+                //}
+
+                if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                    Toast.makeText(this, "Sin permiso BLUETOOTH_CONNECT", Toast.LENGTH_SHORT).show()
+                    Log.e("MainActivity", "Sin permiso BLUETOOTH_CONNECT")
+                    return@setOnClickListener
+                }
+
+                val pairedDevices: Set<BluetoothDevice>? = btAdapter?.bondedDevices
+                btDevice = pairedDevices?.find { it.name == deviceName }
+                    ?: run {
+                        Toast.makeText(this, "ESP32 no emparejado", Toast.LENGTH_SHORT).show()
+                        Log.e("MainActivity", "ESP32 no emparejado")
+                        return@setOnClickListener
                     }
-                    animacionPrincipalPositiva()
-                    barraProgresoConexion.progressTintList = ColorStateList.valueOf(ContextCompat.getColor(this, R.color.verde))
-                    logoBluetooth.setImageResource(R.drawable.bluetoothon)
-                }, 3000)
+
+                Log.d("MainActivity", "Lanzando Servicio")
+                val intent = Intent(this, ServicioConexion::class.java)
+                startService(intent)
+
             } else {
-                btnConectar.text = getText(R.string.Conectar)
-                btnConectar.setTextColor(ContextCompat.getColor(this, R.color.black))
-                barraProgresoConexion.visibility = View.INVISIBLE
-                estadoConexion = false
-                barraProgresoConexion.isIndeterminate = true
-                logoBluetooth.setImageResource(R.drawable.bluetoothoff)
+                Log.d("MainActivity", "Deteniendo Servicio")
+                val intent = Intent(this, ServicioConexion::class.java)
+                stopService(intent)
             }
         }
+
+
 
         btnProximidad.setOnClickListener {
             if (conexionProximidad){
@@ -129,6 +207,40 @@ class MainActivity : AppCompatActivity() {
                 animacionPrincipalNegativa()
             }, 4000)
         }
+    }
+
+    private fun conexionIntentado() {
+        estadoConexion = 2
+        btnConectar.text = getText(R.string.Conectando)
+        btnConectar.setTextColor(ContextCompat.getColor(this, R.color.naranja))
+        barraProgresoConexion.visibility = View.VISIBLE
+    }
+
+    private fun conexionEstablecida() {
+        estadoConexion = 1
+        btnConectar.text = getText(R.string.Conectado)
+        btnConectar.setTextColor(ContextCompat.getColor(this, R.color.verde))
+        barraProgresoConexion.isIndeterminate = false
+
+        ObjectAnimator.ofInt(barraProgresoConexion, "progress", 0, 100).apply {
+            duration = 500 // 5 segundos
+            interpolator = LinearInterpolator()
+            start()
+        }
+
+        animacionPrincipalPositiva()
+        barraProgresoConexion.progressTintList = ColorStateList.valueOf(ContextCompat.getColor(this, R.color.verde))
+        logoBluetooth.setImageResource(R.drawable.bluetoothon)
+    }
+
+    private fun conexionFinaliza() {
+        estadoConexion = 0
+        btnConectar.text = getText(R.string.Conectar)
+        btnConectar.setTextColor(ContextCompat.getColor(this, R.color.black))
+        barraProgresoConexion.visibility = View.INVISIBLE
+        barraProgresoConexion.isIndeterminate = true
+        logoBluetooth.setImageResource(R.drawable.bluetoothoff)
+        animacionPrincipalNegativa()
     }
 
     private fun animacionPrincipalIndeterminada() {
@@ -195,5 +307,50 @@ class MainActivity : AppCompatActivity() {
 
         animX.start()
         animY.start()
+    }
+
+
+
+
+
+    override fun onStart() {
+        super.onStart()
+        val filter = IntentFilter("com.example.pruebaconexion.MensajeDeServicio")
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(receptorMensaje, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(receptorMensaje, filter)
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        unregisterReceiver(receptorMensaje)
+    }
+
+    private fun verificarPermisos(): Boolean {
+        return requiredPermissions.all {
+            ActivityCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    private fun solicitarPermiso() {
+        ActivityCompat.requestPermissions(this, requiredPermissions, REQUEST_PERMISSIONS_CODE)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_PERMISSIONS_CODE) {
+            if (grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
+                Toast.makeText(this, "Permisos otorgados", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "La app necesita permisos para funcionar", Toast.LENGTH_LONG).show()
+            }
+        }
     }
 }
