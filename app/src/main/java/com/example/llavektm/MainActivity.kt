@@ -214,6 +214,9 @@ class MainActivity : AppCompatActivity() {
         btnConectar.text = getText(R.string.Conectando)
         btnConectar.setTextColor(ContextCompat.getColor(this, R.color.naranja))
         barraProgresoConexion.visibility = View.VISIBLE
+        logoBluetooth.setImageResource(R.drawable.bluetoothoff)
+        barraProgresoConexion.isIndeterminate = true
+        barraProgresoConexion.indeterminateTintList = ColorStateList.valueOf(ContextCompat.getColor(this, R.color.naranja))
     }
 
     private fun conexionEstablecida() {
@@ -309,19 +312,16 @@ class MainActivity : AppCompatActivity() {
         animY.start()
     }
 
-
-
-
-
     override fun onStart() {
         super.onStart()
         val filter = IntentFilter("com.example.pruebaconexion.MensajeDeServicio")
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(receptorMensaje, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            registerReceiver(receptorMensaje, filter)
-        }
+        ContextCompat.registerReceiver(
+            this,
+            receptorMensaje,
+            filter,
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
     }
 
     override fun onStop() {
