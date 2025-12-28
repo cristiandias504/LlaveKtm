@@ -1,82 +1,77 @@
 package com.example.llavektm
 
 import android.Manifest
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.Service
-import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothDevice
-import android.bluetooth.BluetoothSocket
-import android.content.BroadcastReceiver
-import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
+import android.app.*
+import android.bluetooth.*
+import android.bluetooth.le.*
+import android.content.*
 import android.content.pm.PackageManager
-import android.os.Build
-import android.os.Handler
-import android.os.IBinder
-import android.os.Looper
+import android.os.*
 import android.util.Log
-import android.widget.Toast
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import java.io.IOException
-import java.util.UUID
+import java.util.*
 
 class ServicioConexion : Service() {
 
-    private val deviceName = "ESP32"
-    private val sppUUID: UUID =
-        UUID.fromString("00001101-0000-1000-8000-00805F9B34FB") // UUID estándar SPP
-    private var btSocket: BluetoothSocket? = null
-    private lateinit var btDevice: BluetoothDevice
-    private val btAdapter: BluetoothAdapter? = BluetoothAdapter.getDefaultAdapter()
+    companion object {
+        private const val TAG = "BLE"
+    }
 
-    private lateinit var handler: Handler
-    private lateinit var runnable: Runnable
+    // ===== CONFIG BLE =====
+    private val DEVICE_NAME = "ESP32_BLE_TEST"
 
-    private var tiempoInicio = 0L
+    private val SERVICE_UUID =
+        UUID.fromString("12345678-1234-1234-1234-1234567890ab")
 
-    private var servicioActivo = false
+    private val RX_UUID =
+        UUID.fromString("12345678-1234-1234-1234-1234567890ac")
+
+    private val TX_UUID =
+        UUID.fromString("12345678-1234-1234-1234-1234567890ad")
+
+    private val CCCD_UUID =
+        UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+
+    private var bluetoothGatt: BluetoothGatt? = null
+    private var rxCharacteristic: BluetoothGattCharacteristic? = null
+    private var txCharacteristic: BluetoothGattCharacteristic? = null
+
+    private val bluetoothAdapter: BluetoothAdapter? =
+        BluetoothAdapter.getDefaultAdapter()
+
+    private val bleScanner by lazy {
+        bluetoothAdapter?.bluetoothLeScanner
+    }
+
     private var conexionEstablecida = false
     private var servicioFinalizado = false
-    private var ControlReconexion = true
 
-    private val ProcesadorDatos = ProcesadorDatos()
+    private val procesadorDatos = ProcesadorDatos()
 
-
-    // Receptor de Broadcast
+    // ===== BROADCAST RECEIVER =====
     private val receptorMensaje = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            val mensaje = intent?.getStringExtra("Mensaje") ?: "Sin mensaje"
-            Log.d("ServicioConexion", "Mensaje recibido: $mensaje")
-            if (mensaje == "Verificacion de estado") {
-                val intentBroadcast = Intent("com.example.pruebaconexion.MensajeDeServicio").apply {
-                    setPackage(packageName)
-                    putExtra("Mensaje", "Respuesta Verificacion de estado = $conexionEstablecida")
-                }
+            val mensaje = intent?.getStringExtra("Mensaje") ?: return
+            Log.d(TAG, "📨 Desde Activity: $mensaje")
 
-                Log.d("ServicioConexion", "Respuesta Verificacion de estado = $conexionEstablecida")
-                sendBroadcast(intentBroadcast)
-            } else if (mensaje == "Enviar 301") {
-                enviarMensaje("301")
-            } else if (mensaje == "Enviar 302") {
-                enviarMensaje("302")
+            when (mensaje) {
+                "Enviar 301" -> enviarMensaje("301")
+                "Enviar 302" -> enviarMensaje("302")
             }
         }
     }
 
-
+    // ===== CICLO DE VIDA =====
     override fun onCreate() {
         super.onCreate()
-        crearCanal()
-        iniciarComoForeground()
-        connectToDevice()
+        Log.d(TAG, "🚀 Servicio creado")
 
+        crearCanal()
+        iniciarForeground()
 
         val filter = IntentFilter("com.example.pruebaconexion.MensajeDeActivity")
-
         ContextCompat.registerReceiver(
             this,
             receptorMensaje,
@@ -84,267 +79,232 @@ class ServicioConexion : Service() {
             ContextCompat.RECEIVER_NOT_EXPORTED
         )
 
-        val intentBroadcast = Intent("com.example.pruebaconexion.MensajeDeServicio").apply {
-            setPackage(packageName)
-            putExtra("Mensaje", "Servicio iniciado correctamente")
-        }
-
-        Log.d("ServicioConexion", "Servicio iniciado correctamente")
-        sendBroadcast(intentBroadcast)
+        iniciarScanBLE()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Log.d(TAG, "▶️ onStartCommand")
         return START_STICKY
     }
 
+    override fun onDestroy() {
+        Log.d(TAG, "🛑 Servicio destruido")
+        servicioFinalizado = true
+        bluetoothGatt?.let {
+            refreshGattCache(it)
+            it.disconnect()
+            it.close()
+        }
+        bluetoothGatt = null
+        unregisterReceiver(receptorMensaje)
+        super.onDestroy()
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    // ===== NOTIFICACIÓN =====
     private fun crearCanal() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val nombre = "Canal Principal"
-            val descripcion = "Canal para notificaciones de ejemplo"
-            val importancia = NotificationManager.IMPORTANCE_DEFAULT
-            val canal = NotificationChannel("canal_id", nombre, importancia).apply {
-                description = descripcion
-            }
-
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(canal)
+            val canal = NotificationChannel(
+                "canal_ble",
+                "Servicio BLE",
+                NotificationManager.IMPORTANCE_LOW
+            )
+            getSystemService(NotificationManager::class.java)
+                .createNotificationChannel(canal)
         }
     }
 
-    private fun iniciarComoForeground() {
-        val notification = NotificationCompat.Builder(this, "canal_id")
-            .setContentTitle("Conexión activa")
-            .setContentText("Servicio Bluetooth en ejecución")
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+    private fun iniciarForeground() {
+        val notification = NotificationCompat.Builder(this, "canal_ble")
+            .setContentTitle("BLE activo")
+            .setContentText("Esperando ESP32")
+            .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
             .build()
 
         startForeground(1, notification)
     }
 
-    private fun connectToDevice() {
-        Thread {
-            while (!conexionEstablecida && !servicioFinalizado) {
-                try {
-                    if (ActivityCompat.checkSelfPermission(
-                            this,
-                            Manifest.permission.BLUETOOTH_CONNECT
-                        ) != PackageManager.PERMISSION_GRANTED
-                    ) {
-                        Handler(Looper.getMainLooper()).post {
-                            Toast.makeText(
-                                this,
-                                "Sin permiso BLUETOOTH_CONNECT",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        }
-                        return@Thread
-                    }
+    // ===== SCAN BLE =====
+    private fun iniciarScanBLE() {
+        Log.d(TAG, "🔍 iniciarScanBLE()")
 
-                    if (btAdapter == null) {
-                        Handler(Looper.getMainLooper()).post {
-                            Toast.makeText(this, "Bluetooth no está disponible", Toast.LENGTH_SHORT)
-                                .show()
-                        }
-                        return@Thread
-                    }
+        if (ActivityCompat.checkSelfPermission(
+                this,
+                Manifest.permission.BLUETOOTH_SCAN
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            Log.e(TAG, "❌ Sin permiso BLUETOOTH_SCAN")
+            return
+        }
 
-                    if (!btAdapter.isEnabled) {
-                        Handler(Looper.getMainLooper()).post {
-                            Toast.makeText(this, "Activa el Bluetooth", Toast.LENGTH_SHORT).show()
-                        }
-                        return@Thread
-                    }
+        val filtro = ScanFilter.Builder()
+            .setDeviceName(DEVICE_NAME)
+            .build()
 
-                    val pairedDevices: Set<BluetoothDevice>? = btAdapter?.bondedDevices
-                    btDevice = pairedDevices?.find { it.name == deviceName }
-                        ?: run {
-                            Toast.makeText(this, "ESP32 no emparejado", Toast.LENGTH_SHORT).show()
-                            return@Thread
-                        }
+        val settings = ScanSettings.Builder()
+            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .build()
 
-                    btSocket = btDevice.createRfcommSocketToServiceRecord(sppUUID)
-                    btSocket?.connect()
-
-                    // Crear y enviar el broadcast
-                    val intentBroadcast =
-                        Intent("com.example.pruebaconexion.MensajeDeServicio").apply {
-                            setPackage(packageName)
-                            putExtra("Mensaje", "Conexion establecida Correctamente")
-                        }
-
-                    Log.d("ServicioConexion", "Conexion establecida Correctamente")
-                    sendBroadcast(intentBroadcast)
-
-                    conexionEstablecida = true
-                    servicioActivo = false
-                    iniciarRecepcionMensajes()
-                    //iniciarMensajePeriodico()
-
-                } catch (e: InterruptedException) {
-                    Log.e("ServicioConexion", "Bucle de reconexión interrumpido", e)
-                    break
-                } catch (e: IOException) {
-                    Log.d("ServicioConexion", "Intentando reconectar con ESP32...")
-                }
-                Thread.sleep(5_000) // espera 10 segundos antes de volver a intentar
-            }
-        }.start()
+        bleScanner?.startScan(listOf(filtro), settings, scanCallback)
+        Log.d(TAG, "📡 Escaneando ESP32 BLE...")
     }
 
-    private fun iniciarRecepcionMensajes() {
-        Thread {
-            try {
-                val inputStream = btSocket?.inputStream
-                val mensajeAcumulado = StringBuilder()
+    private val scanCallback = object : ScanCallback() {
+        override fun onScanResult(type: Int, result: ScanResult) {
+            Log.d(TAG, "✅ Encontrado: ${result.device.name} | ${result.device.address}")
+            bleScanner?.stopScan(this)
+            conectarGatt(result.device)
+        }
 
-                while (ControlReconexion && btSocket != null && btSocket!!.isConnected) {
-
-                    val byte = inputStream?.read() ?: -1
-                    if (byte != -1) {
-                        val char = byte.toChar()
-
-                        if (char == '\n') {
-                            val mensajeCompleto = mensajeAcumulado.toString().trim()
-                            Log.d("Bluetooth", "Mensaje recibido: $mensajeCompleto")
-
-                            if (mensajeCompleto.length == 15) {
-                                val respuesta = ProcesadorDatos.procesarClaveInical(mensajeCompleto)
-                                Log.d("Bluetooth", "Respuesta de ProcesadorDatos: $respuesta")
-
-                                if (respuesta == "200") {
-                                    btSocket?.outputStream?.write("200\n".toByteArray())
-                                }
-                            } else if (mensajeCompleto.length == 5) {
-                                val respuesta = ProcesadorDatos.procesarClaveDinamica(mensajeCompleto)
-                                btSocket?.outputStream?.write("$respuesta\n".toByteArray())
-                                Log.d("Bluetooth", "Clave Descifrada: $respuesta")
-                            } else if (mensajeCompleto.length == 4) {
-                                val intentBroadcast = Intent("com.example.pruebaconexion.MensajeDeServicio").apply {
-                                    setPackage(packageName)
-                                    putExtra("Mensaje", mensajeCompleto)
-                                }
-                                Log.d("Bluetooth", "Respuesta Recibida del ESP32: $mensajeCompleto")
-                                sendBroadcast(intentBroadcast)
-                            }
-
-                            mensajeAcumulado.clear() // reinicia para el siguiente mensaje
-                        } else {
-                            mensajeAcumulado.append(char)
-                        }
-                    }
-                }
-            } catch (e: IOException) {
-                if (!ControlReconexion) {
-                    Log.e("Bluetooth", "Fallo Controlado")
-                } else {
-                    Log.e("Bluetooth", "Error al recibir datos", e)
-                    reiniciarConexion()
-                }
-            }
-        }.start()
-    }
-
-
-    private fun iniciarMensajePeriodico() {
-        if (!servicioActivo) {
-            if (conexionEstablecida) {
-                servicioActivo = true
-                handler = Handler(Looper.getMainLooper())
-                runnable = object : Runnable {
-                    override fun run() {
-                        if (conexionEstablecida) {
-                            enviarMensaje("Hola")
-                            handler.postDelayed(this, 10_000) // cada 10 segundos
-                        } else {
-                            Log.d("ServicioConexion", "Runnable detenido por desconexión")
-                        }
-                    }
-                }
-                Log.d("ServicioConexion", "Handler Iniciado")
-
-                tiempoInicio = System.currentTimeMillis()
-
-                handler.post(runnable)
-            }
+        override fun onScanFailed(errorCode: Int) {
+            Log.e(TAG, "❌ Scan fallido: $errorCode")
         }
     }
 
-    private fun enviarMensaje(mensaje: String) {
-        if (btSocket != null && btSocket!!.isConnected) {
-            try {
-                btSocket?.outputStream?.write((mensaje + "\n").toByteArray())
-                //btSocket?.outputStream?.write("200\n".toByteArray())
-                Log.d("ServicioConexion", "Mensaje enviado al ESP32: $mensaje")
-            } catch (e: IOException) {
+    // ===== CONEXIÓN GATT =====
+    private fun conectarGatt(device: BluetoothDevice) {
+        Log.d(TAG, "🔗 Conectando a GATT: ${device.address}")
+
+        if (ActivityCompat.checkSelfPermission(
+                this,
+                Manifest.permission.BLUETOOTH_CONNECT
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            Log.e(TAG, "❌ Sin permiso BLUETOOTH_CONNECT")
+            return
+        }
+
+        bluetoothGatt = device.connectGatt(this, false, gattCallback)
+    }
+
+    private val gattCallback = object : BluetoothGattCallback() {
+
+        override fun onConnectionStateChange(
+            gatt: BluetoothGatt,
+            status: Int,
+            newState: Int
+        ) {
+            Log.d(TAG, "🔄 ConnectionState status=$status newState=$newState")
+
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                Log.e(TAG, "❌ Error GATT: $status")
+                gatt.close()
+                reiniciarConexion()
+                return
+            }
+
+            if (newState == BluetoothProfile.STATE_CONNECTED) {
+                Log.d(TAG, "🔐 Conectado, descubriendo servicios")
+                gatt.discoverServices()
+            } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                Log.w(TAG, "⚠️ Desconectado")
                 reiniciarConexion()
             }
-        } else {
-            reiniciarConexion()
+        }
+
+        override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
+            Log.d(TAG, "🧩 Servicios descubiertos status=$status")
+
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                Log.e(TAG, "❌ Error al descubrir servicios")
+                return
+            }
+
+            val service = gatt.getService(SERVICE_UUID)
+            if (service == null) {
+                Log.e(TAG, "❌ Servicio NO encontrado")
+                return
+            }
+
+            Log.d(TAG, "✅ Servicio encontrado")
+
+            rxCharacteristic = service.getCharacteristic(RX_UUID)
+            txCharacteristic = service.getCharacteristic(TX_UUID)
+
+            if (rxCharacteristic == null || txCharacteristic == null) {
+                Log.e(TAG, "❌ RX o TX no encontrados")
+                return
+            }
+
+            Log.d(TAG, "✅ Características RX/TX OK")
+            activarNotificaciones(gatt)
+        }
+
+        override fun onCharacteristicChanged(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic
+        ) {
+            val mensaje = characteristic.value.toString(Charsets.UTF_8).trim()
+            Log.d(TAG, "📥 RX: '$mensaje'")
+
+            when (mensaje.length) {
+                15 -> enviarMensaje(procesadorDatos.procesarClaveInical(mensaje) ?: "ERR")
+                5  -> enviarMensaje(procesadorDatos.procesarClaveDinamica(mensaje) ?: "ERR")
+                4  -> {
+                    val intent = Intent("com.example.pruebaconexion.MensajeDeServicio")
+                    intent.putExtra("Mensaje", mensaje)
+                    sendBroadcast(intent)
+                }
+            }
         }
     }
 
+    // ===== NOTIFICACIONES =====
+    private fun activarNotificaciones(gatt: BluetoothGatt) {
+        Log.d(TAG, "🔔 Activando notificaciones")
 
+        gatt.setCharacteristicNotification(txCharacteristic, true)
+
+        val descriptor = txCharacteristic?.getDescriptor(CCCD_UUID)
+        if (descriptor == null) {
+            Log.e(TAG, "❌ CCCD no encontrado")
+            return
+        }
+
+        descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+        val ok = gatt.writeDescriptor(descriptor)
+
+        Log.d(TAG, "✍️ writeDescriptor enviado: $ok")
+        conexionEstablecida = true
+    }
+
+    // ===== ENVÍO =====
+    private fun enviarMensaje(mensaje: String) {
+        if (!conexionEstablecida) {
+            Log.w(TAG, "⚠️ No conectado, no se envía")
+            return
+        }
+
+        rxCharacteristic?.value = (mensaje + "\n").toByteArray()
+        bluetoothGatt?.writeCharacteristic(rxCharacteristic)
+        Log.d(TAG, "📤 TX: $mensaje")
+    }
+
+    private fun refreshGattCache(gatt: BluetoothGatt): Boolean {
+        return try {
+            val refresh = gatt.javaClass.getMethod("refresh")
+            refresh.invoke(gatt) as Boolean
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ No se pudo refrescar GATT", e)
+            false
+        }
+    }
+
+    // ===== RECONEXIÓN =====
     private fun reiniciarConexion() {
-        Log.d("ServicioConexion", "Dispositivo Desconectado... Reiniciando conexión")
+        Log.w(TAG, "🔄 Reiniciando conexión")
         conexionEstablecida = false
-        cerrarSocket()
 
-        // Crear y enviar el broadcast
-        val intentBroadcast = Intent("com.example.pruebaconexion.MensajeDeServicio").apply {
-            setPackage(packageName)
-            putExtra(
-                "Mensaje",
-                "Servicio iniciado correctamente"
-            ) // Texto temporal, realmente el servicio no se inicia aca, es para cambiar de verde a naranja
+        bluetoothGatt?.let {
+            refreshGattCache(it)
+            it.disconnect()
+            it.close()
         }
-
-        sendBroadcast(intentBroadcast)
-
-
-        if (::handler.isInitialized && ::runnable.isInitialized) {
-            handler.removeCallbacks(runnable)
-        }
+        bluetoothGatt = null
 
         Handler(Looper.getMainLooper()).postDelayed({
-            connectToDevice()
-        }, 6_000)
+            if (!servicioFinalizado) iniciarScanBLE()
+        }, 3000)
     }
-
-    private fun cerrarSocket() {
-        try {
-            btSocket?.close()
-            btSocket = null
-            Log.d("ServicioConexion", "BluetoothSocket cerrado")
-        } catch (e: IOException) {
-            Log.e("ServicioConexion", "Error al cerrar el socket", e)
-        }
-    }
-
-    override fun onDestroy() {
-        if (::handler.isInitialized && ::runnable.isInitialized) {
-            handler.removeCallbacks(runnable)
-        }
-        servicioFinalizado = true
-        servicioActivo = false
-        ControlReconexion = false
-        super.onDestroy()
-
-        // Cierra el socket Bluetooth
-        cerrarSocket()
-
-        // Elimina el registro en el Broadcast
-        unregisterReceiver(receptorMensaje)
-
-        Log.d("ServicioConexion", "Finalizando Servicio")
-
-        val intentBroadcast = Intent("com.example.pruebaconexion.MensajeDeServicio").apply {
-            setPackage(packageName)
-            putExtra("Mensaje", "Conexión Bluetooth finalizada")
-        }
-
-        sendBroadcast(intentBroadcast)
-    }
-
-    override fun onBind(intent: Intent?): IBinder? = null
 }

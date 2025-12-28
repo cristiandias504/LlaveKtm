@@ -104,6 +104,8 @@ class MainActivity : AppCompatActivity() {
             v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
             insets
         }
+        solicitarPermiso()
+
 
         // Verificar permisos
         if (!verificarPermisos()) {
@@ -147,13 +149,13 @@ class MainActivity : AppCompatActivity() {
                     return@setOnClickListener
                 }
 
-                val pairedDevices: Set<BluetoothDevice>? = btAdapter?.bondedDevices
-                btDevice = pairedDevices?.find { it.name == deviceName }
-                    ?: run {
-                        Toast.makeText(this, "ESP32 no emparejado", Toast.LENGTH_SHORT).show()
-                        Log.e("MainActivity", "ESP32 no emparejado")
-                        return@setOnClickListener
-                    }
+                //val pairedDevices: Set<BluetoothDevice>? = btAdapter?.bondedDevices
+                //btDevice = pairedDevices?.find { it.name == deviceName }
+                //    ?: run {
+                //        Toast.makeText(this, "ESP32 no emparejado", Toast.LENGTH_SHORT).show()
+                //        Log.e("MainActivity", "ESP32 no emparejado")
+                //        return@setOnClickListener
+                //    }
 
                 Log.d("MainActivity", "Lanzando Servicio")
                 val intent = Intent(this, ServicioConexion::class.java)
@@ -351,8 +353,44 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+
+    private val PERMISOS_BLE_31 = arrayOf(
+        Manifest.permission.BLUETOOTH_SCAN,
+        Manifest.permission.BLUETOOTH_CONNECT,
+        Manifest.permission.ACCESS_FINE_LOCATION,
+    )
+
+    private val PERMISOS_BLE_LEGACY = arrayOf(
+        Manifest.permission.BLUETOOTH,
+        Manifest.permission.BLUETOOTH_ADMIN,
+        Manifest.permission.ACCESS_FINE_LOCATION
+    )
+
+    private val PERMISO_NOTIFICACIONES = arrayOf(
+        Manifest.permission.POST_NOTIFICATIONS
+    )
+
     private fun solicitarPermiso() {
-        ActivityCompat.requestPermissions(this, requiredPermissions, REQUEST_PERMISSIONS_CODE)
+
+        val permisosApedir = mutableListOf<String>()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            permisosApedir += PERMISOS_BLE_31
+        } else {
+            permisosApedir += PERMISOS_BLE_LEGACY
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permisosApedir += PERMISO_NOTIFICACIONES
+        }
+
+        val permisosFaltantes = permisosApedir.filter {
+            checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED
+        }
+
+        if (permisosFaltantes.isNotEmpty()) {
+            requestPermissions(permisosFaltantes.toTypedArray(), 1001)
+        }
     }
 
     override fun onRequestPermissionsResult(
