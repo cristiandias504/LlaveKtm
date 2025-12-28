@@ -68,12 +68,14 @@ class MainActivity : AppCompatActivity() {
                 conexionEstablecida()
             } else if (mensaje == "Conexión Bluetooth finalizada") {
                 conexionFinaliza()
-            } else if (mensaje == "Respuesta Verificacion de estado = true"){
+            } else if (mensaje == "Respuesta Verificacion de estado = true") {
                 conexionEstablecida()
                 Log.d("MainActivity", "Verificacion Completa: Servicio Activo, Conexion Estable")
-            }  else if (mensaje == "Respuesta Verificacion de estado = false"){
+            } else if (mensaje == "Respuesta Verificacion de estado = false") {
                 conexionIntentado()
                 Log.d("MainActivity", "Verificacion Completa: Servicio Activo, Sin Conexion")
+            } else if (mensaje == "301Y") {
+                animacionPrincipalPositiva()
             } else {
                 //CuadroMensaje.text = mensaje.toString()
             }
@@ -196,16 +198,30 @@ class MainActivity : AppCompatActivity() {
 
         btnApagar.setOnClickListener {
             animacionPrincipalIndeterminada()
-            Handler(Looper.getMainLooper()).postDelayed({
-                animacionPrincipalPositiva()
-            }, 4000)
+            //Handler(Looper.getMainLooper()).postDelayed({
+            //    animacionPrincipalPositiva()
+            //}, 4000)
+            val intentBroadcast = Intent("com.example.pruebaconexion.MensajeDeActivity").apply {
+                setPackage(packageName)
+                putExtra("Mensaje", "Enviar 301")
+            }
+
+            Log.d("MainActivity", "Enviar 301")
+            sendBroadcast(intentBroadcast)
         }
 
         btnAlarma.setOnClickListener {
-            animacionPrincipalIndeterminada()
-            Handler(Looper.getMainLooper()).postDelayed({
-                animacionPrincipalNegativa()
-            }, 4000)
+            //animacionPrincipalIndeterminada()
+            //Handler(Looper.getMainLooper()).postDelayed({
+            //    animacionPrincipalNegativa()
+            //}, 4000)
+            val intentBroadcast = Intent("com.example.pruebaconexion.MensajeDeActivity").apply {
+                setPackage(packageName)
+                putExtra("Mensaje", "Enviar 302")
+            }
+
+            Log.d("MainActivity", "Enviar 302")
+            sendBroadcast(intentBroadcast)
         }
     }
 

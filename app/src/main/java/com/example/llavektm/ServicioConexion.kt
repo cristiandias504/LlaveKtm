@@ -43,6 +43,8 @@ class ServicioConexion : Service() {
     private var servicioFinalizado = false
     private var ControlReconexion = true
 
+    private val ProcesadorDatos = ProcesadorDatos()
+
 
     // Receptor de Broadcast
     private val receptorMensaje = object : BroadcastReceiver() {
@@ -57,6 +59,10 @@ class ServicioConexion : Service() {
 
                 Log.d("ServicioConexion", "Respuesta Verificacion de estado = $conexionEstablecida")
                 sendBroadcast(intentBroadcast)
+            } else if (mensaje == "Enviar 301") {
+                enviarMensaje("301")
+            } else if (mensaje == "Enviar 302") {
+                enviarMensaje("302")
             }
         }
     }
@@ -202,13 +208,25 @@ class ServicioConexion : Service() {
                             val mensajeCompleto = mensajeAcumulado.toString().trim()
                             Log.d("Bluetooth", "Mensaje recibido: $mensajeCompleto")
 
-                            // Enviar a la actividad
-                            val intentBroadcast =
-                                Intent("com.example.pruebaconexion.MensajeDeServicio").apply {
+                            if (mensajeCompleto.length == 15) {
+                                val respuesta = ProcesadorDatos.procesarClaveInical(mensajeCompleto)
+                                Log.d("Bluetooth", "Respuesta de ProcesadorDatos: $respuesta")
+
+                                if (respuesta == "200") {
+                                    btSocket?.outputStream?.write("200\n".toByteArray())
+                                }
+                            } else if (mensajeCompleto.length == 5) {
+                                val respuesta = ProcesadorDatos.procesarClaveDinamica(mensajeCompleto)
+                                btSocket?.outputStream?.write("$respuesta\n".toByteArray())
+                                Log.d("Bluetooth", "Clave Descifrada: $respuesta")
+                            } else if (mensajeCompleto.length == 4) {
+                                val intentBroadcast = Intent("com.example.pruebaconexion.MensajeDeServicio").apply {
                                     setPackage(packageName)
                                     putExtra("Mensaje", mensajeCompleto)
                                 }
-                            sendBroadcast(intentBroadcast)
+                                Log.d("Bluetooth", "Respuesta Recibida del ESP32: $mensajeCompleto")
+                                sendBroadcast(intentBroadcast)
+                            }
 
                             mensajeAcumulado.clear() // reinicia para el siguiente mensaje
                         } else {
@@ -236,7 +254,7 @@ class ServicioConexion : Service() {
                 runnable = object : Runnable {
                     override fun run() {
                         if (conexionEstablecida) {
-                            enviarMensaje()
+                            enviarMensaje("Hola")
                             handler.postDelayed(this, 10_000) // cada 10 segundos
                         } else {
                             Log.d("ServicioConexion", "Runnable detenido por desconexión")
@@ -252,12 +270,12 @@ class ServicioConexion : Service() {
         }
     }
 
-    private fun enviarMensaje() {
+    private fun enviarMensaje(mensaje: String) {
         if (btSocket != null && btSocket!!.isConnected) {
             try {
-                btSocket?.outputStream?.write("Hola desde el Servicio\n".toByteArray())
+                btSocket?.outputStream?.write((mensaje + "\n").toByteArray())
                 //btSocket?.outputStream?.write("200\n".toByteArray())
-                Log.d("ServicioConexion", "Mensaje enviado al ESP32")
+                Log.d("ServicioConexion", "Mensaje enviado al ESP32: $mensaje")
             } catch (e: IOException) {
                 reiniciarConexion()
             }
