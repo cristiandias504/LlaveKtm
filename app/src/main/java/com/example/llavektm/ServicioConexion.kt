@@ -17,6 +17,8 @@ class ServicioConexion : Service() {
 
     companion object {
         private const val TAG = "BLE"
+        private const val PREFS = "BLE_PREFS"
+        private const val KEY_MAC = "ESP32_MAC"
     }
 
     // ===== CONFIG BLE =====
@@ -48,6 +50,8 @@ class ServicioConexion : Service() {
     private var conexionEstablecida = false
     private var servicioFinalizado = false
 
+    private var dispositivoGuardado: BluetoothDevice? = null
+
     private val procesadorDatos = ProcesadorDatos()
 
     // ===== BROADCAST RECEIVER =====
@@ -71,6 +75,16 @@ class ServicioConexion : Service() {
         crearCanal()
         iniciarForeground()
 
+        cargarDispositivoGuardado()
+
+        if (dispositivoGuardado == null) {
+            Log.d(TAG, "🔍 No hay dispositivo guardado, iniciando SCAN")
+            iniciarScanBLE()
+        } else {
+            Log.d(TAG, "🔗 Conectando directo al dispositivo guardado")
+            conectarGatt(dispositivoGuardado!!, autoConnect = true)
+        }
+
         val filter = IntentFilter("com.example.pruebaconexion.MensajeDeActivity")
         ContextCompat.registerReceiver(
             this,
@@ -79,7 +93,7 @@ class ServicioConexion : Service() {
             ContextCompat.RECEIVER_NOT_EXPORTED
         )
 
-        iniciarScanBLE()
+        //iniciarScanBLE()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -125,7 +139,7 @@ class ServicioConexion : Service() {
         startForeground(1, notification)
     }
 
-    // ===== SCAN BLE =====
+    // ===== SCAN BLE (SOLO PRIMERA VEZ) =====
     private fun iniciarScanBLE() {
         Log.d(TAG, "🔍 iniciarScanBLE()")
 
@@ -154,7 +168,9 @@ class ServicioConexion : Service() {
         override fun onScanResult(type: Int, result: ScanResult) {
             Log.d(TAG, "✅ Encontrado: ${result.device.name} | ${result.device.address}")
             bleScanner?.stopScan(this)
-            conectarGatt(result.device)
+
+            guardarDispositivo(result.device)
+            conectarGatt(result.device, autoConnect = false)
         }
 
         override fun onScanFailed(errorCode: Int) {
@@ -163,19 +179,14 @@ class ServicioConexion : Service() {
     }
 
     // ===== CONEXIÓN GATT =====
-    private fun conectarGatt(device: BluetoothDevice) {
-        Log.d(TAG, "🔗 Conectando a GATT: ${device.address}")
-
+    private fun conectarGatt(device: BluetoothDevice, autoConnect: Boolean) {
         if (ActivityCompat.checkSelfPermission(
                 this,
                 Manifest.permission.BLUETOOTH_CONNECT
             ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            Log.e(TAG, "❌ Sin permiso BLUETOOTH_CONNECT")
-            return
-        }
+        ) return
 
-        bluetoothGatt = device.connectGatt(this, false, gattCallback)
+        bluetoothGatt = device.connectGatt(this, autoConnect, gattCallback)
     }
 
     private val gattCallback = object : BluetoothGattCallback() {
@@ -204,30 +215,11 @@ class ServicioConexion : Service() {
         }
 
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
-            Log.d(TAG, "🧩 Servicios descubiertos status=$status")
-
-            if (status != BluetoothGatt.GATT_SUCCESS) {
-                Log.e(TAG, "❌ Error al descubrir servicios")
-                return
-            }
-
-            val service = gatt.getService(SERVICE_UUID)
-            if (service == null) {
-                Log.e(TAG, "❌ Servicio NO encontrado")
-                return
-            }
-
-            Log.d(TAG, "✅ Servicio encontrado")
+            val service = gatt.getService(SERVICE_UUID) ?: return
 
             rxCharacteristic = service.getCharacteristic(RX_UUID)
             txCharacteristic = service.getCharacteristic(TX_UUID)
 
-            if (rxCharacteristic == null || txCharacteristic == null) {
-                Log.e(TAG, "❌ RX o TX no encontrados")
-                return
-            }
-
-            Log.d(TAG, "✅ Características RX/TX OK")
             activarNotificaciones(gatt)
         }
 
@@ -235,19 +227,27 @@ class ServicioConexion : Service() {
             gatt: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic
         ) {
-            val mensaje = characteristic.value.toString(Charsets.UTF_8).trim()
-            Log.d(TAG, "📥 RX: '$mensaje'")
-
-            when (mensaje.length) {
-                15 -> enviarMensaje(procesadorDatos.procesarClaveInical(mensaje) ?: "ERR")
-                5  -> enviarMensaje(procesadorDatos.procesarClaveDinamica(mensaje) ?: "ERR")
-                4  -> {
-                    val intent = Intent("com.example.pruebaconexion.MensajeDeServicio")
-                    intent.putExtra("Mensaje", mensaje)
-                    sendBroadcast(intent)
+            val mensajeRecibido = characteristic.value.toString(Charsets.UTF_8)
+            Log.d(TAG, "📥 RX: $mensajeRecibido")
+            if (mensajeRecibido.length == 15) {
+                val respuesta = procesadorDatos.procesarClaveInical(mensajeRecibido)
+                if (respuesta == "200"){
+                    enviarMensaje("200")
                 }
+            } else if (mensajeRecibido.length == 5) {
+                val respuesta = procesadorDatos.procesarClaveDinamica(mensajeRecibido)
+                enviarMensaje(respuesta)
+                Log.d(TAG, "Clave Descifrada: $respuesta")
             }
+
         }
+
+
+
+
+
+
+
     }
 
     // ===== NOTIFICACIONES =====
@@ -276,7 +276,7 @@ class ServicioConexion : Service() {
             return
         }
 
-        rxCharacteristic?.value = (mensaje + "\n").toByteArray()
+        rxCharacteristic?.value = (mensaje).toByteArray() //+ "\n").toByteArray()
         bluetoothGatt?.writeCharacteristic(rxCharacteristic)
         Log.d(TAG, "📤 TX: $mensaje")
     }
@@ -304,7 +304,27 @@ class ServicioConexion : Service() {
         bluetoothGatt = null
 
         Handler(Looper.getMainLooper()).postDelayed({
-            if (!servicioFinalizado) iniciarScanBLE()
+            if (!servicioFinalizado && dispositivoGuardado != null) {
+                Log.d(TAG, "🔁 Esperando reconexión automática")
+                conectarGatt(dispositivoGuardado!!, autoConnect = true)
+            }
         }, 3000)
+    }
+
+    private fun guardarDispositivo(device: BluetoothDevice) {
+        dispositivoGuardado = device
+        getSharedPreferences(PREFS, MODE_PRIVATE)
+            .edit()
+            .putString(KEY_MAC, device.address)
+            .apply()
+    }
+
+    private fun cargarDispositivoGuardado() {
+        val mac = getSharedPreferences(PREFS, MODE_PRIVATE)
+            .getString(KEY_MAC, null)
+
+        mac?.let {
+            dispositivoGuardado = bluetoothAdapter?.getRemoteDevice(it)
+        }
     }
 }
