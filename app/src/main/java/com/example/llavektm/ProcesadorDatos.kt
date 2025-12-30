@@ -3,19 +3,14 @@ package com.example.llavektm
 import android.util.Log
 
 class ProcesadorDatos {
-
     var clave: IntArray = IntArray(4)
-
     val arrayA: IntArray = intArrayOf(6, 2, 5, 1, 4, 9, 8, 7, 3) // Desplazar X+Num de la izquierda a la derecha
     //val arrayB: IntArray = intArrayOf(2, 9, 8, 4, 6, 1, 5, 3, 7)
     //val arrayC: IntArray = intArrayOf(5, 3, 6, 7, 2, 9, 4, 8, 1)
-
     var desplazamiento: Int = 0
     var claveDinamicaDescifrada: IntArray = IntArray(5)
 
-
     fun procesarClaveInical(mensaje: String): String {
-
         //Validar la longitud, debe tener 15 caracteres para ser valido
         if (mensaje.length != 15) {
             return "Tamaño de calve inicial no valido: ${mensaje.length}"
@@ -52,7 +47,6 @@ class ProcesadorDatos {
     }
 
     fun procesarClaveDinamica(mensaje: String): String {
-
         //Validar la longitud, debe tener 5 caracteres para ser valido
         if (mensaje.length != 5) {
             return "Tamaño de clave dinamica no valido ${mensaje.length}"
